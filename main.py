@@ -1,314 +1,418 @@
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import dcc, html
+from dash.dependencies import Input, Output, State
 import base64
-import datetime
 import io
-import os
 import numpy as np
 from PIL import Image
-import tensorflow as tf
-
-import pandas as pd
-from dash import Dash, dcc, html, dash_table, Input, Output, State, clientside_callback
-import dash_bootstrap_components as dbc
+import tensorflow.keras.models
+from dash.dependencies import Input, Output, State
+from tensorflow.keras.models import load_model
+from io import BytesIO
 import plotly.graph_objs as go
 
-# Load the model
-model_path = './model.h5'
-model = tf.keras.models.load_model(model_path)
+# Define o caminho para o modelo
+model_path = '.\model.h5'
 
-# Define the class labels
-class_labels = ['Class 0', 'Class 1', 'Class 2', 'Class 3', 'Class 4']
+threadsEscFraca = [2, 4, 6, 8, 10, 12]
+temposEscFraca = [0.2040, 0.3144, 0.3738, 0.4093, 0.6169, 0.7767]
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP, dbc.icons.FONT_AWESOME])
+# Dados
+threads_forte = [2, 4, 6, 8, 10, 12, 14]
+tempos_forte = [1.6833, 1.0672, 0.8853, 0.7243, 0.7239, 0.7006, 0.7143]
 
-color_mode_switch = html.Span(
+# Carrega o modelo
+model = load_model(model_path)
+
+# Define os rótulos das classes
+class_labels = ['Normal', 'Duvidoso', 'Moderado', 'Avançado', 'Severo']
+
+app = dash.Dash(external_stylesheets=[dbc.themes.SLATE, dbc.icons.BOOTSTRAP])
+server = app.server
+
+
+
+imgUpload = dcc.Upload(
+    id='upload-image',
+    children=html.Div([
+        html.A(
+            html.I(className="bi bi-file-earmark-arrow-up", style={"fontSize": "50px", "align": "center", "margin": "20px", "padding": "20px"}),
+            style={'width': '100%', 'height': '100%'},
+        )
+    ]),
+    style={'width': '0', 'height': '0'},
+    multiple=False
+)
+
+toastPrevisao = dbc.Toast(
+    [html.P(id='prediction-output', className="mb-0")],
+    header="Classificação",
+)
+
+######METRICAS PAI#######
+
+row1 = html.Tr([html.Td("T.Execução"), html.Td("30.32m"), html.Td("32.91m")])
+row2 = html.Tr([html.Td("Acurácia"), html.Td("0.4848"), html.Td("0.4848")])
+row3 = html.Tr([html.Td("Precisão"), html.Td("0.4871"), html.Td("0.4994")])
+row4 = html.Tr([html.Td("Recall"), html.Td("0.4848"), html.Td("0.4848")])
+row5 = html.Tr([html.Td("F1-Score"), html.Td("0.4823"), html.Td("0.4562")])
+row6 = html.Tr([html.Td("Especificidade"), html.Td("0.4848"), html.Td("0.4848")])
+
+table_body = [html.Tbody([row1, row2, row3, row4, row5])]
+
+
+
+tablePAI = [
+    html.Thead(html.Tr([html.Th("Metricas"), html.Th("Normal"), html.Th("Paralelo")]))
+]
+
+tablePAIColuns = dbc.Table(tablePAI + table_body, bordered=True)
+
+
+
+cardPAI = dbc.Card(
     [
-        dbc.Label(className="fa fa-moon", html_for="switch"),
-        dbc.Switch( id="switch", value=True, className="d-inline-block ms-1", persistence=True),
-        dbc.Label(className="fa fa-sun", html_for="switch"),
+        dbc.CardHeader(
+            dbc.Tabs(
+                [
+                    dbc.Tab(label="Metricas", tab_id="Tab-1PAI"),
+                    dbc.Tab(label="Matriz de Confusão", tab_id="Tab-2PAI"),
+                    dbc.Tab(label="Curva ROC", tab_id="Tab-3PAI"),
+                   # dbc.Tab(label="Índice Jaccard", tab_id="Tab-4PAI"),
+                ],
+                id="cardPAI-tabs",
+                active_tab="tab-1",
+            )
+        ),
+        dbc.CardBody(html.P(id="card-contentPAI", className="card-textPAI")),
     ]
 )
 
-# Adicione um novo gráfico para exibir as métricas reais
-app.layout = html.Div([
-    html.H1('Classificador de níveis de Osteoartrose'),
-    dbc.Row([
-        color_mode_switch,
-        dbc.Col(
-            [
-                dcc.Upload(
-                    id='upload-data',
-                    children=html.Div([
-                        html.H4('Arraste a imagem ou selecione um arquivo (.jpg .png)')
-                    ]),
-                    style={
-                        'width': '100%',
-                        'height': '90%',
-                        'lineHeight': '300%',
-                        'borderWidth': '1px',
-                        'borderStyle': 'solid',
-                        'borderRadius': '5px',
-                        'textAlign': 'center',
-                        'margin': '10px',
-                        'textColor': 'black',
-                    },
-                    # Allow multiple files to be uploaded
-                    multiple=False
-                ),
-                dcc.Slider(
-                    id='my-slider',
-                    min=1,
-                    max=20,
-                    step=1,
-                    value=10,
-                    marks={i: str(i) for i in range(21)},
-                ),
-                html.Div(id='slider-output-container'),
-                dcc.Graph(id='metrics-graph'),  # Novo gráfico para métricas reais
-                dcc.Dropdown(
-                    id='demo-dropdown',
-                    options=[
-                        {'label': 'Gráfico de Barras', 'value': 'bar'},
-                        {'label': 'Gráfico de Pizza', 'value': 'pie'}
-                    ],
-                    value='bar',
-                    style={'width': '100%',
-                           'lineHeight': '100%',
-                           'textAlign': 'center',
-                           'marginTop': '5px',
-                           'textColor': 'black',
-                           'backgroundColor': 'white'
-                           }
-                ),
-                html.Div(id='dd-output-container', ),
+@app.callback(
+    Output("card-contentPAI", "children"), [Input("cardPAI-tabs", "active_tab")]
+)
+def tab_contentPAI(active_tab):
+    if active_tab == "Tab-1PAI":
+        return tablePAIColuns
+    elif active_tab == "Tab-2PAI":
+        return html.Img(src='assets/matriz_confusao.png', style={'width': '100%'})
+    elif active_tab == "Tab-3PAI":
+        return html.Img(src='assets/curva_roc.png', style={'width': '100%'})
 
-            ],
-            width=4,style={'backgroundColor':'light_blue',
-                           'margin': '10px',}
+    else:
+        return "Tab desconhecida"
+
+#####METRICAS PARALELA########
+
+row1 = html.Tr([html.Td("T.Treinamento"), html.Td("32.91m")])
+row2 = html.Tr([html.Td("Speed-Up"), html.Td("0.9213")])
+
+
+table_body = [html.Tbody([row1, row2])]
+
+
+tablePARALELA = [
+    html.Thead(html.Tr([html.Th("Metricas"), html.Th("Resultados")]))
+]
+
+tablePARALELAColuns = dbc.Table(tablePARALELA + table_body, bordered=True)
+
+cardPARALELA = dbc.Card(
+    [
+        dbc.CardHeader(
+            dbc.Tabs(
+                [
+                    dbc.Tab(label="Metricas", tab_id="Tab-1PARALELA"),
+                    dbc.Tab(label="Esc. Fraca", tab_id="Tab-2PARALELA"),
+                    dbc.Tab(label="Esc. Forte", tab_id="Tab-3PARALELA"),
+                ],
+                id="cardPARALELA-tabs",
+                active_tab="tab-1",
+            )
         ),
-        dbc.Col(
+        dbc.CardBody(html.P(id="card-contentPARALELA", className="card-textPARALELA")),
+    ]
+)
+
+@app.callback(
+    Output("card-contentPARALELA", "children"), [Input("cardPARALELA-tabs", "active_tab")]
+)
+def tab_contentPARALELA(active_tab):
+    if active_tab == "Tab-1PARALELA":
+        return tablePARALELAColuns
+    elif active_tab == "Tab-2PARALELA":
+        return html.Button("Atualizar", id="btn"), dcc.Graph(id='GraficoEscFraca')
+    elif active_tab == "Tab-3PARALELA":
+        return html.Button("Atualizar", id="btn"),dcc.Graph(id='graph')
+    elif active_tab == "Tab-4PARALELA":
+        return "Conteúdo da Tab 2PAI"
+    else:
+        return "Tab desconhecida"
+
+######METRICAS DISTRIBUIDA########
+
+
+cardDistribuida = dbc.Card(
+    [
+        dbc.CardHeader(
+            dbc.Tabs(
+                [
+                    dbc.Tab(label="Tempo de CPU", tab_id="tab-1Distribuida"),
+                    dbc.Tab(label="Uso de Memoria", tab_id="tab-2Distribuida"),
+                    dbc.Tab(label="Tempo de resposta", tab_id="tab-3Distribuida"),
+                    dbc.Tab(label="Requests", tab_id="tab-4Distribuida"),
+
+                ],
+                id="cardDistribuida-tabs",
+                active_tab="tab-1",
+            )
+        ),
+        dbc.CardBody(html.P(id="card-contentDistribuida", className="card-textDistribuida")),
+    ]
+)
+
+# Lista de conteúdos dos cartões
+card_contents = [
+    {
+        "header": "Card 1",
+        "title": "Original",
+        "text": "Imagem original fornecida pelo usuário",
+        "image": None,# Adicione a chave "image" com o valor None para o Card 1
+        "id": "card-Card 1-image"
+    },
+    {
+        "header": "Card 2",
+        "title": "Redimensionada",
+        "text": "Imagem redimensionada para 256x256",
+    },
+    {
+        "header": "Card 3",
+        "title": "Escala de cinza",
+        "text": "Imagem convertida para escala de cinza"
+    },
+    {
+        "header": "Card 4",
+        "title": "Normalizada",
+        "text": "Imagem normalizada para o modelo"
+    },
+    # Adicione mais dicionários para mais cartões
+]
+
+# Criação dos cartões
+cards = []
+for content in card_contents:
+    card = dbc.Col(  # Coloque cada cartão em uma coluna
+        dbc.Card(
             [
-                html.Div(id='output-data-upload',
-                         style={
-                             'width': '150%',
-                             'height': '100%',
-                             'lineHeight': '100%',
-                             'borderWidth': '1px',
-                             'borderStyle': 'solid',
-                             'borderRadius': '5px',
-                             'textAlign': 'center',
-                         }),
+                dbc.CardHeader(content["header"]),
+                dbc.CardBody(
+                    [
+                        html.H5(content["title"], className="card-title"),
+                        html.P(content["text"], className="card-text"),
+                        html.Img(id=f"card-{content['header']}-image", src=content.get("image", ""), style={'width': '100%'})
+                    ]
+                ),
             ],
-            width=3
+            color="primary",
+            inverse=True,
+            style={"margin": "5px"}
         ),
-    ]),
+        md=3  # Ajuste o tamanho da coluna conforme necessário
+    )
+    cards.append(card)
+
+# Agora, 'cards' é uma lista de cartões que você pode adicionar ao seu layout
+
+collapse = html.Div(
+    [
+        dbc.Button(
+            html.I(className="bi bi-box-arrow-right"),
+            id="horizontal-collapse-button",
+            className="mb-3",
+            color="primary",
+            n_clicks=0,
+        ),
+        html.Div(
+            dbc.Collapse(
+                dbc.Card(
+                    dbc.CardBody(
+                        dbc.Row([
+                            dbc.Col([
+                                imgUpload
+                            ])
+                        ])
+                    ),
+                    style={"width": "300px","height": "100vh", "margin": "3px","z-index": "1000","background-color": "rgba(50, 56, 62, 0.7)"}
+                ),
+                id="horizontal-collapse",
+                is_open=False,
+                dimension="width",
+            ),
+            style={"minHeight": "100px","rgba": "50, 56, 62, 0.5"}
+        ),
+    ]
+)
+
+
+app.layout = html.Div([
+        dbc.Row([
+            dbc.Col([
+                collapse,
+            ], sm=1),
+            dbc.Col([
+                dbc.Row(cards),  # Coloque todas as colunas em uma linha
+
+            ], sm=11)
+        ]),
+        dbc.Row([
+            toastPrevisao
+        ]),
+        dbc.Row([
+            dbc.Col([
+                cardPAI
+            ], sm=4),
+            dbc.Col([
+                cardPARALELA
+            ], sm=4),
+            dbc.Col([
+                cardDistribuida
+            ], sm=4)
+        ]),
+
 ])
 
-# Mantenha um histórico das métricas
-metric_history = []
 
-# Mantenha um contador de True Positives
-true_positives_count = 0
 
-# Atualize o contador de True Positives quando uma nova imagem for processada
-def update_true_positives_count(image_bytes):
-    global true_positives_count
-    predicted_class = classify_image(image_bytes)
-    if predicted_class == "A imagem possui osteoartrose.":
-        true_positives_count += 1
-
-# Atualize o callback update_metrics_graph
 @app.callback(
-    Output('metrics-graph', 'figure'),
-    Input('upload-data', 'contents'),
-    State('upload-data', 'filename'),
-    State('upload-data', 'last_modified'),
-    State('metrics-graph', 'figure'))
-def update_metrics_graph(contents, filename, date, existing_figure):
-    global true_positives_count
-
-    # Atualize o contador de True Positives se uma nova imagem for processada
-    if contents is not None:
-        update_true_positives_count(contents.encode('utf-8'))
-
-    # Adicione as métricas ao histórico
-    false_positives = 0  # Defina false_positives e outros valores conforme necessário
-    false_negatives = 0
-    true_negatives = 0
-    f_score = 0
-
-    # Adicione as métricas ao histórico
-    metric_history.append({'True Positives': true_positives_count, 'False Positives': false_positives,
-                           'False Negatives': false_negatives, 'True Negatives': true_negatives,
-                           'F-score': f_score})
-
-    # Limita o número de pontos no gráfico para 20
-    if len(metric_history) > 20:
-        metric_history.pop(0)  # Remove o primeiro ponto do histórico
-
-    # Atualize os dados do gráfico com base no histórico
-    x_values = list(metric_history[0].keys())  # Usa as chaves do primeiro dicionário como x
-    data = []
-    for metric_name in x_values:
-        y_values = [metric[metric_name] for metric in metric_history]
-        data.append(go.Bar(x=list(range(1, len(metric_history) + 1)), y=y_values,
-                           name=metric_name))
-
-    # Retorna a figura atualizada
-    updated_figure = {
-        'data': data,
-        'layout': go.Layout(
-            title='Métricas de Avaliação',
-            yaxis=dict(title='Valor'),
-        )
-    }
-
-    return updated_figure
-
-#Function to classify the uploaded image
-def classify_image(image_bytes):
-    # Load and preprocess the image
-    image = Image.open(io.BytesIO(image_bytes))
-    image = image.resize((256, 256))
-    image = image.convert('L')
-    image = np.expand_dims(image, axis=-1)
-    image = np.expand_dims(image, axis=0)
-
-    # Make the prediction
-    prediction = model.predict(image)
-
-    # Get the predicted class label
-    predicted_class = class_labels[np.argmax(prediction)]
-
-    # Return message indicating whether the image has osteoarthritis or not
-    if predicted_class == 'Class 0':  # Adjust this condition based on your model's output
-        return "A imagem não possui osteoartrose."
-    else:
-        return "A imagem possui osteoartrose."
-
-#Parse de dados
-def parse_contents(contents, filename, date):
-    if contents is None:
-        return html.Div(['Sem arquivo selecionado'])
-
-    try:
+    [Output('card-Card 1-image', 'src'),
+     Output('card-Card 2-image', 'src'),
+     Output('card-Card 3-image', 'src'),
+     Output('card-Card 4-image', 'src'),
+     Output('prediction-output', 'children')],
+    [Input('upload-image', 'contents')])
+def update_output(contents):
+    if contents:
+        # Obtém o tipo de conteúdo e o conteúdo codificado em base64
         content_type, content_string = contents.split(',')
+
+        # Decodifica a string base64
         decoded = base64.b64decode(content_string)
 
-        if 'image' in content_type:
-            # Construindo o src da imagem com base no conteúdo
-            src = 'data:image/png;base64,' + base64.b64encode(decoded).decode()
+        # Abre a imagem
+        image = Image.open(io.BytesIO(decoded))
 
-            # Make prediction on the uploaded image
-            osteoarthritis_message = classify_image(decoded)
+        # Redimensiona a imagem para o tamanho de entrada do modelo
+        resized_image = image.resize((256, 256))
 
-            # Retorna a div com a imagem e a mensagem sobre a osteoartrose
-            return html.Div([
-                html.H5(filename),
-                html.Img(src=src),
-                html.H6(datetime.datetime.fromtimestamp(date)),
-                html.P(osteoarthritis_message)
-            ])
-        elif 'csv' in filename:
-            df = pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-            # Restante do código...
-    except Exception as e:
-        print(e)
-        return html.Div(['Houve um erro ao processar o arquivo.'])
+        # Converte a imagem para escala de cinza
+        grayscale_image = resized_image.convert('L')
 
-#Callback do upload da imagem (alterar valores da propriedade da imagem para valores pertinentes ao trabalho)
-@app.callback(Output('output-data-upload', 'children'),
-              Input('upload-data', 'contents'),
-              State('upload-data', 'filename'),
-              State('upload-data', 'last_modified'))
-def update_output(contents, filename, date):
-    # Adicionando instruções de impressão para depurar
-    print("Contents:", contents)
-    print("Filename:", filename)
-    print("Date:", date)
+        # Converte a imagem em escala de cinza para um array numpy
+        image_np = np.array(grayscale_image)
 
-    if contents is not None:
-        children = parse_contents(contents, filename, date)
-        return children
-    else:
-        return html.Div(['Sem arquivo selecionado'])
+        # Normaliza os dados da imagem
+        image_np = image_np.astype('float32') / 255.0
+
+        # Adiciona uma nova dimensão à imagem para corresponder ao formato de entrada do modelo
+        image_np = np.expand_dims(image_np, axis=-1)
+
+        # Faz a previsão
+        prediction = model.predict(np.expand_dims(image_np, axis=0))
+
+        # Obtém a classe prevista
+        predicted_class = class_labels[np.argmax(prediction)]
+
+        # Codifica as imagens para base64 para exibição
+        original_image_b64 = image_to_b64(image)
+        resized_image_b64 = image_to_b64(resized_image)
+        grayscale_image_b64 = image_to_b64(grayscale_image)
+
+        # Escala a imagem normalizada de volta para 0-255 e converte para uint8 para exibição
+        final_image = Image.fromarray((np.squeeze(image_np, axis=-1) * 255).astype('uint8'))
+        final_image_b64 = image_to_b64(final_image)
+
+        return (f'data:image/png;base64,{original_image_b64}',
+                f'data:image/png;base64,{resized_image_b64}',
+                f'data:image/png;base64,{grayscale_image_b64}',
+                f'data:image/png;base64,{final_image_b64}',
+                f'Classe prevista: {predicted_class}')
+
+    return (dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update)
+def image_to_b64(image):
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    return base64.b64encode(buffered.getvalue()).decode()
 
 
-#Callback do slide (usar pra testes)
-@app.callback(
-    Output('slider-output-container', 'children'),
-    Input('my-slider', 'value'))
-def update_output(value):
-    return "" #'Número de pontos no gráfico "{}"'.format(value)
-
-
-#Callback do gráfico
-@app.callback(
-    Output('graph1', 'figure'),
-    [Input('my-slider', 'value')])
-def update_graph1(value):
-    return {
-        'data': [go.Bar(x=['A', 'B', 'C'], y=[value, value+1, value+2])],
-        'layout': go.Layout(title='Gráfico 1')
-    }
 
 @app.callback(
-    Output('graph2', 'figure'),
-    [Input('my-slider', 'value')])
-def update_graph2(value):
-    return {
-        'data': [go.Scatter(x=[1, 2, 3], y=[value, value*2, value*3])],
-        'layout': go.Layout(title='Gráfico 2')
-    }
-
-@app.callback(
-    Output('graph3', 'figure'),
-    [Input('my-slider', 'value')])
-def update_graph3(value):
-    return {
-        'data': [go.Pie(labels=['Label 1', 'Label 2', 'Label 3'], values=[value, value+1, value+2])],
-        'layout': go.Layout(title='Gráfico 3')
-    }
-#Callback do botão
-@app.callback(
-    Output('dd-output-container', 'children'),
-    Input('demo-dropdown', 'value')
+    Output("card-contentPARALELA", "childrenPARALELA"), [Input("cardPARALELA-tabs", "active_tabPARALELA")]
 )
-def update_output(value):
-    return #f'You have selected {value}'
+def tab_content(active_tab):
+    return "This is tab {}".format(active_tab)
 
 @app.callback(
-    Output('pie-chart', 'figure'),
-    Input('my-slider', 'value'))
-def update_pie_chart(value):
-    labels = ['Usage', 'Free']
-    values = [value, 100-value]  # Valores falsos
+    Output("card-contentDistribuida", "childrenDistribuida"), [Input("cardDistribuida-tabs", "active_tabDistribuida")]
+)
+def tab_content(active_tab):
+    return "This is tab {}".format(active_tab)
 
-    fig = go.Figure(data=[go.Pie(labels=labels, values=values)])
-
+# Callback para atualizar o gráfico quando o botão for clicado
+@app.callback(
+    Output('GraficoEscFraca', 'figure'),
+    [Input('btn', 'n_clicks')]
+)
+def update_graph(n_clicks):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=threadsEscFraca,
+        y=temposEscFraca,
+        mode='lines+markers',
+        marker=dict(size=10),
+        line=dict(width=2)
+    ))
+    fig.update_layout(
+        title='Escalabilidade Fraca',
+        xaxis=dict(title='Threads'),
+        yaxis=dict(title='Tempo de Execução'),
+        showlegend=False
+    )
     return fig
 
+# Callback para atualizar o gráfico quando o botão for clicado
 @app.callback(
-    Output('classification-output', 'children'),
-    [Input('upload-data', 'contents')])
-def update_classification(contents):
-    if contents is not None:
-        # Faça sua lógica de classificação aqui
-        classification = 'Classificação Falsa'  # Valor falso
-        return classification
-    else:
-        return 'Sem arquivo selecionado'
-
-clientside_callback(
-    """
-    (switchOn) => {
-       document.documentElement.setAttribute("data-bs-theme", switchOn ? "light" : "dark");
-       return window.dash_clientside.no_update
-    }
-    """,
-    Output("switch", "id"),
-    Input("switch", "value"),
+    Output('graph', 'figure'),
+    [Input('btn', 'n_clicks')]
 )
+def update_graph(n_clicks):
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=threads_forte,
+        y=tempos_forte,
+        mode='lines+markers',
+        marker=dict(size=10),
+        line=dict(width=2)
+    ))
+    fig.update_layout(
+        title='Escalabilidade Forte',
+        xaxis=dict(title='Threads'),
+        yaxis=dict(title='Tempo de Execução'),
+        showlegend=False
+    )
+    return fig
 
-if __name__ == '__main__':
-    app.run_server(debug=True)
 
+@app.callback(
+    Output("horizontal-collapse", "is_open"),
+    [Input("horizontal-collapse-button", "n_clicks")],
+    [State("horizontal-collapse", "is_open")],
+)
+def toggle_collapse(n, is_open):
+    if n:
+        return not is_open
+    return is_open
+
+if __name__ == "__main__":
+    app.run_server()
