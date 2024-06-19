@@ -1,4 +1,3 @@
-
 import dash
 import dash_bootstrap_components as dbc
 from dash import dcc, html
@@ -7,14 +6,13 @@ import base64
 import io
 import numpy as np
 from PIL import Image
-import tensorflow.keras.models
-from dash.dependencies import Input, Output, State
 from tensorflow.keras.models import load_model
+from dash.dependencies import Input, Output, State
 from io import BytesIO
 import plotly.graph_objs as go
 
 # Define o caminho para o modelo
-model_path = '.\model.h5'
+model_path = 'model.h5'
 
 threadsEscFraca = [2, 4, 6, 8, 10, 12]
 temposEscFraca = [0.2040, 0.3144, 0.3738, 0.4093, 0.6169, 0.7767]
